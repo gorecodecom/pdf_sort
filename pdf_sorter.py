@@ -33,10 +33,34 @@ class PDFSorter:
         }
     }
 
+    # Default categories that should always be available
+    DEFAULT_CATEGORIES = {
+        "01 Antrag": {
+            'document_types': ['antrag', 'application', 'bewerbung', 'formular', 'form'],
+            'created_at': '2024-01-01T00:00:00'
+        },
+        "02 Bescheid": {
+            'document_types': ['bescheid', 'decision', 'entscheidung', 'beschluss', 'notice'],
+            'created_at': '2024-01-01T00:00:00'
+        },
+        "03 Vertrag": {
+            'document_types': ['vertrag', 'contract', 'vereinbarung', 'agreement'],
+            'created_at': '2024-01-01T00:00:00'
+        },
+        "04 Rechnung": {
+            'document_types': ['rechnung', 'invoice', 'bill', 'faktura', 'beleg', 'quittung'],
+            'created_at': '2024-01-01T00:00:00'
+        },
+        "05 Information": {
+            'document_types': ['information', 'info', 'infoblatt', 'mitteilung', 'benachrichtigung'],
+            'created_at': '2024-01-01T00:00:00'
+        }
+    }
+
     def __init__(self, source_dir: str):
         """
         Initialize the PDF sorter with a source directory.
-        
+
         Args:
             source_dir (str): Path to the directory containing PDF files
         """
@@ -44,6 +68,10 @@ class PDFSorter:
         self.cloud_type = self._check_if_cloud_path(source_dir)
         self.knowledge_file = self._get_knowledge_file_path()
         self.learned_categories = self._load_learned_categories()
+
+        # Ensure default categories are always available
+        self._ensure_default_categories()
+
         self.vectorizer = TfidfVectorizer(
             min_df=1, 
             stop_words=['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'with'],
@@ -159,10 +187,13 @@ class PDFSorter:
         Check if the path is in a cloud storage directory.
         Returns the cloud service name or None.
         """
-        path = path.lower()
+        path = path.lower().replace('\\', '/')  # Normalize path separators
         for service, data in self.CLOUD_PATHS.items():
             if any(indicator.lower() in path for indicator in data['indicators']):
                 return service
+        # Check for common Windows cloud paths
+        if 'icloud' in path or 'icloudrive' in path:
+            return 'icloud'
         return None
         
     def _load_learned_categories(self) -> Dict:
@@ -174,6 +205,38 @@ class PDFSorter:
             except json.JSONDecodeError:
                 return {}
         return {}
+
+    def _ensure_default_categories(self):
+        """Ensure default categories are present in learned categories."""
+        # Migration mapping for old categories to new ones
+        migration_map = {
+            "01 Vertrag": "03 Vertrag",
+            "02 Information": "05 Information", 
+            "03 Rechnung": "04 Rechnung"
+        }
+
+        # Migrate old categories to new structure
+        for old_cat, new_cat in migration_map.items():
+            if old_cat in self.learned_categories and new_cat not in self.learned_categories:
+                print(f"Migrating category: {old_cat} → {new_cat}")
+                self.learned_categories[new_cat] = self.learned_categories[old_cat]
+                del self.learned_categories[old_cat]
+
+        # Add default categories if they don't exist
+        for category, data in self.DEFAULT_CATEGORIES.items():
+            if category not in self.learned_categories:
+                # Check if there's an underscore version that should be updated
+                underscore_version = category.replace(' ', '_')
+                if underscore_version in self.learned_categories:
+                    # Move data from underscore version to space version
+                    self.learned_categories[category] = self.learned_categories[underscore_version]
+                    del self.learned_categories[underscore_version]
+                else:
+                    # Add new default category
+                    self.learned_categories[category] = data.copy()
+
+        # Save updated categories
+        self._save_learned_categories()
         
     def _save_learned_categories(self):
         """Save learned categories to file."""
@@ -199,10 +262,15 @@ class PDFSorter:
         if not self.learned_categories:
             return None
             
+        doc_type_lower = doc_type.lower()
+
         # Check each category's known document types
         for category, data in self.learned_categories.items():
-            if doc_type.lower() in [t.lower() for t in data['document_types']]:
-                return category
+            for known_type in data['document_types']:
+                # Check for exact match or partial match
+                if (known_type.lower() in doc_type_lower or 
+                    doc_type_lower in known_type.lower()):
+                    return category
                 
         return None
         
@@ -229,62 +297,29 @@ class PDFSorter:
                         pass
                     print("Please enter a valid number.")
         
-        # Show existing categories
-        if self.learned_categories:
-            print("\nExisting categories:")
-            categories = list(self.learned_categories.keys())
-            for i, category in enumerate(categories, 1):
-                print(f"{i}. {category}")
-                # Show known document types for this category
+        # Show predefined categories only
+        print("\nAvailable categories:")
+        categories = ["01 Antrag", "02 Bescheid", "03 Vertrag", "04 Rechnung", "05 Information"]
+        for i, category in enumerate(categories, 1):
+            print(f"{i}. {category}")
+            # Show known document types for this category
+            if category in self.learned_categories:
                 doc_types = self.learned_categories[category]['document_types']
                 if doc_types:
                     print(f"   Known types: {', '.join(doc_types)}")
-            print("n. Create new category")
-            
-            choice = input("\nChoose category number or 'n' for new: ").strip().lower()
-            
-            if choice == 'n':
-                return self._create_new_category(doc_type)
-            try:
-                idx = int(choice) - 1
-                category = categories[idx]
-                self._update_category_knowledge(category, doc_type)
-                return category
-            except (ValueError, IndexError):
-                print("Invalid choice. Creating new category.")
-                return self._create_new_category(doc_type)
-        else:
-            return self._create_new_category(doc_type)
-            
-    def _create_new_category(self, doc_type: str) -> str:
-        """Create a new category and learn from it."""
+
         while True:
-            category = input("\nEnter new category name (without number prefix): ").strip()
-            if category and not any(c in category for c in '\\/:*?"<>|'):
-                break
-            print("Invalid category name. Avoid special characters.")
+            try:
+                choice = int(input("\nChoose category number (1-5): "))
+                if 1 <= choice <= 5:
+                    category = categories[choice - 1]
+                    self._update_category_knowledge(category, doc_type)
+                    return category
+                else:
+                    print("Please enter a number between 1 and 5.")
+            except ValueError:
+                print("Please enter a valid number.")
             
-        # Get current categories and determine next number
-        existing_categories = self._get_ordered_categories()
-        next_num = len(existing_categories) + 1
-        
-        # Create new category with number prefix
-        numbered_category = f"{str(next_num).zfill(2)}_{category}"
-        
-        self.learned_categories[numbered_category] = {
-            'document_types': [doc_type],
-            'created_at': datetime.now().isoformat()
-        }
-        self._save_learned_categories()
-        
-        # Create the folder
-        try:
-            (self.source_dir / numbered_category).mkdir(exist_ok=True)
-            print(f"Created folder: {numbered_category}")
-        except Exception as e:
-            print(f"Error creating folder {numbered_category}: {str(e)}")
-            
-        return numbered_category
         
     def _update_category_knowledge(self, category: str, doc_type: str):
         """Update category knowledge with new document type."""
@@ -371,6 +406,54 @@ class PDFSorter:
             print(f"\nError creating year folder {year}: {str(e)}")
             return category_dir  # Fallback to category directory if creation fails
 
+    def _format_filename(self, filename: str) -> str:
+        """
+        Format filename to change date format from yyyymmdd to yyyy-mm-dd.
+
+        Args:
+            filename (str): Original filename
+
+        Returns:
+            str: Formatted filename with yyyy-mm-dd date format
+        """
+        # Get file extension
+        path_obj = Path(filename)
+        stem = path_obj.stem
+        extension = path_obj.suffix
+
+        # Look for date pattern yyyymmdd at the beginning of filename
+        date_pattern = r'^(\d{4})(\d{2})(\d{2})(_|-)(.+)$'
+        match = re.match(date_pattern, stem)
+
+        if match:
+            year, month, day, separator, rest = match.groups()
+            # Format as yyyy-mm-dd rest (replace separator with space)
+            formatted_stem = f"{year}-{month}-{day} {rest}"
+            return formatted_stem + extension
+
+        # If no date pattern found, return original filename
+        return filename
+
+    def _rename_file_if_needed(self, file_path: Path, target_dir: Path) -> Path:
+        """
+        Rename file with proper date formatting and return the new target path.
+
+        Args:
+            file_path (Path): Current file path
+            target_dir (Path): Directory where file will be moved
+
+        Returns:
+            Path: Final target path with formatted filename
+        """
+        original_filename = file_path.name
+        formatted_filename = self._format_filename(original_filename)
+
+        # Check if filename was changed
+        if formatted_filename != original_filename:
+            print(f"\n  Renaming: {original_filename} → {formatted_filename}")
+
+        return target_dir / formatted_filename
+
     def sort_pdfs(self) -> Dict[str, List[str]]:
         """Sort files into appropriate categories and year subfolders."""
         results = defaultdict(lambda: defaultdict(list))
@@ -437,18 +520,88 @@ class PDFSorter:
             else:
                 target_dir = category_dir
 
-            # Move file
-            target_path = target_dir / file.name
+            # Rename file if needed and get target path
+            target_path = self._rename_file_if_needed(file, target_dir)
+
+            # Debug output
+            print(f"\n  DEBUG:")
+            print(f"  Source file: {file}")
+            print(f"  Source exists: {file.exists()}")
+            print(f"  Target dir: {target_dir}")
+            print(f"  Target path: {target_path}")
+            print(f"  Target dir exists: {target_dir.exists()}")
+
+            # Check if file already exists at target location
+            if target_path.exists():
+                print(f"\n  File already exists: {target_path.name}")
+                choice = input("  Overwrite? (y/n): ").lower()
+                if choice != 'y':
+                    print(f"  Skipped: {file.name}")
+                    continue
+
             try:
-                # For cloud storage, ensure we have write permission
+                # Ensure target directory exists
+                print(f"  Creating target directory: {target_dir}")
+                target_dir.mkdir(parents=True, exist_ok=True)
+                print(f"  Target directory created/exists: {target_dir.exists()}")
+
+                # For cloud storage, show additional info
                 if self.is_cloud_path:
-                    print(f"\nMoving {file.name} to {target_dir.relative_to(self.source_dir)}...")
+                    print(f"\n  Moving {file.name} to {target_dir.relative_to(self.source_dir)}...")
+
+                print(f"  Attempting to move file...")
+                print(f"  From: {file}")
+                print(f"  To: {target_path}")
+
+                # Perform the move operation
                 shutil.move(str(file), str(target_path))
-                results[category][year if year else "no_year"].append(file.name)
-            except Exception as e:
-                print(f"\nError moving file {file}: {str(e)}")
+
+                print(f"  Move command executed")
+
+                # For iCloud, add delay to allow sync
                 if self.is_cloud_path:
-                    print("This might be due to cloud sync issues. Please try again in a few moments.")
+                    print(f"  Waiting for iCloud sync...")
+                    time.sleep(2)
+
+                    # Force file system refresh by trying to list directory
+                    try:
+                        list(self.source_dir.iterdir())
+                        list(target_dir.iterdir())
+                    except:
+                        pass
+
+                # Verify the move was successful (check multiple times for iCloud)
+                max_checks = 5 if self.is_cloud_path else 1
+                for check_num in range(max_checks):
+                    if check_num > 0:
+                        time.sleep(1)
+                        print(f"  Verification attempt {check_num + 1}...")
+
+                    source_exists_after = file.exists()
+                    target_exists_after = target_path.exists()
+
+                    print(f"  After move - Source exists: {source_exists_after}")
+                    print(f"  After move - Target exists: {target_exists_after}")
+
+                    if target_exists_after and not source_exists_after:
+                        results[category][year if year else "no_year"].append(target_path.name)
+                        print(f"  ✓ Successfully moved to: {target_path.relative_to(self.source_dir)}")
+                        break
+                    elif check_num == max_checks - 1:
+                        print(f"  ✗ Move operation failed or incomplete after {max_checks} attempts")
+                        if self.is_cloud_path:
+                            print(f"  This might be an iCloud sync delay. Please check the folders manually.")
+                        break
+
+            except Exception as e:
+                print(f"\n  ERROR moving file {file}: {str(e)}")
+                print(f"  Error type: {type(e).__name__}")
+                import traceback
+                print(f"  Traceback: {traceback.format_exc()}")
+                if self.is_cloud_path:
+                    print("  This might be due to cloud sync issues. Please try again in a few moments.")
+                else:
+                    print("  Please check file permissions and ensure the target directory is writable.")
                 
         print()  # New line after progress indicator
         
@@ -464,28 +617,6 @@ class PDFSorter:
         
         return formatted_results
 
-    def _get_ordered_categories(self) -> List[str]:
-        """Get categories in order, prefixed with numbers if not already prefixed."""
-        categories = list(self.learned_categories.keys())
-        
-        # Check if categories are already numbered
-        numbered = all(re.match(r'^\d+_', cat) for cat in categories)
-        
-        if not numbered:
-            # Sort alphabetically first
-            categories.sort()
-            # Add numbers as prefix
-            categories = [f"{str(i+1).zfill(2)}_{cat}" for i, cat in enumerate(categories)]
-            
-            # Update learned categories with new names
-            new_learned = {}
-            for i, old_cat in enumerate(self.learned_categories.keys()):
-                new_cat = categories[i]
-                new_learned[new_cat] = self.learned_categories[old_cat]
-            self.learned_categories = new_learned
-            self._save_learned_categories()
-            
-        return sorted(categories)
 
     def _sync_folder_structure(self):
         """Synchronize folder structure with the knowledge file."""
@@ -493,24 +624,45 @@ class PDFSorter:
             return
 
         try:
-            # Get ordered categories
-            ordered_categories = self._get_ordered_categories()
-            
             # Get existing folders
             existing_folders = [f.name for f in self.source_dir.iterdir() if f.is_dir()]
-            
-            # Create mapping of folder types (without numbers) to full names
-            existing_folder_map = {
-                re.sub(r'^\d+_', '', folder.lower()): folder
-                for folder in existing_folders
+
+            # Migration mapping for folder renaming
+            folder_migration_map = {
+                "01 Vertrag": "03 Vertrag",
+                "02 Information": "05 Information",
+                "03 Rechnung": "04 Rechnung"
             }
-            
+
+            # Handle folder migrations first
+            for old_folder, new_folder in folder_migration_map.items():
+                old_path = self.source_dir / old_folder
+                new_path = self.source_dir / new_folder
+
+                if old_path.exists() and not new_path.exists():
+                    try:
+                        old_path.rename(new_path)
+                        print(f"Migrated folder: {old_folder} → {new_folder}")
+                        # Update existing_folders list
+                        if old_folder in existing_folders:
+                            existing_folders.remove(old_folder)
+                            existing_folders.append(new_folder)
+                    except Exception as e:
+                        print(f"Error migrating folder {old_folder}: {str(e)}")
+
+            # Create mapping of folder base names to full names
+            existing_folder_map = {}
+            for folder in existing_folders:
+                # Handle both underscore and space formats
+                base_name = re.sub(r'^\d+[\s_]', '', folder.lower())
+                existing_folder_map[base_name] = folder
+
             # Process each category from knowledge file
-            for category in ordered_categories:
+            for category in self.learned_categories.keys():
                 category_path = self.source_dir / category
-                base_name = re.sub(r'^\d+_', '', category.lower())
-                
-                # Check if a similar folder exists (ignoring number prefix)
+                base_name = re.sub(r'^\d+[\s_]', '', category.lower())
+
+                # Check if a similar folder exists (ignoring number prefix and separator)
                 if base_name in existing_folder_map:
                     existing_folder = existing_folder_map[base_name]
                     if existing_folder != category:
@@ -616,6 +768,12 @@ def main():
                     print(f"\n{category}:")
                     for file in files:
                         print(f"  - {file}")
+
+            # For iCloud, add verification reminder
+            if sorter.is_cloud_path:
+                print(f"\n📝 Note: If you're using iCloud, please verify that files have been moved.")
+                print(f"   iCloud sync can sometimes delay file system operations.")
+                print(f"   You can check the folders manually to confirm the moves completed.")
         
         # Ask if user wants to process another folder
         print("\nWould you like to sort another folder?")
