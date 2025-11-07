@@ -73,15 +73,15 @@ class PDFSorter:
         self._ensure_default_categories()
 
         self.vectorizer = TfidfVectorizer(
-            min_df=1, 
+            min_df=1,
             stop_words=['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'with'],
             token_pattern=r'(?u)\b\w+\b'
         )
         self.is_cloud_path = self.cloud_type is not None
-        
+
         # Sync folder structure with knowledge file
         self._sync_folder_structure()
-        
+
     def _get_knowledge_file_path(self) -> Path:
         """Determine the path for the knowledge file."""
         # First, check if knowledge file exists in the current cloud directory
@@ -126,7 +126,7 @@ class PDFSorter:
 
         while True:
             choice = input("Enter number: ").strip()
-            
+
             # Use current cloud storage
             if choice == "1" and self.cloud_type:
                 cloud_base = self._get_cloud_base_path(self.cloud_type)
@@ -134,11 +134,11 @@ class PDFSorter:
                     return Path(cloud_base) / ".pdf_sorter_knowledge.json"
                 print("Error accessing current cloud storage.")
                 continue
-                
+
             # Use local directory
             elif choice == "2":
                 return Path.home() / ".pdf_sorter_knowledge.json"
-                
+
             # Choose different cloud storage
             elif choice == "3":
                 print("\nChoose cloud storage:")
@@ -146,7 +146,7 @@ class PDFSorter:
                 print("2. Google Drive")
                 print("3. Dropbox")
                 print("4. OneDrive")
-                
+
                 cloud_choice = input("Enter number (1-4): ").strip()
                 cloud_type = {
                     "1": "icloud",
@@ -154,34 +154,34 @@ class PDFSorter:
                     "3": "dropbox",
                     "4": "onedrive"
                 }.get(cloud_choice)
-                
+
                 if cloud_type:
                     cloud_base = self._get_cloud_base_path(cloud_type)
                     if cloud_base:
                         return Path(cloud_base) / ".pdf_sorter_knowledge.json"
                 print("Selected cloud storage not found or not accessible.")
                 continue
-                
+
             print("Invalid choice. Please try again.")
-            
+
     def _get_cloud_base_path(self, cloud_type: str) -> str:
         """Get the base path for a cloud service."""
         if cloud_type not in self.CLOUD_PATHS:
             return None
-            
+
         # Try the default path first
         default_path = os.path.expanduser(self.CLOUD_PATHS[cloud_type]['default_path'])
         if os.path.exists(default_path):
             return default_path
-            
+
         # For iCloud, try the full path
         if cloud_type == 'icloud':
             icloud_path = os.path.expanduser("~/Library/Mobile Documents/com~apple~CloudDocs")
             if os.path.exists(icloud_path):
                 return icloud_path
-                
+
         return None
-        
+
     def _check_if_cloud_path(self, path: str) -> str:
         """
         Check if the path is in a cloud storage directory.
@@ -195,7 +195,7 @@ class PDFSorter:
         if 'icloud' in path or 'icloudrive' in path:
             return 'icloud'
         return None
-        
+
     def _load_learned_categories(self) -> Dict:
         """Load previously learned categories and their document types."""
         if self.knowledge_file.exists():
@@ -211,7 +211,7 @@ class PDFSorter:
         # Migration mapping for old categories to new ones
         migration_map = {
             "01 Vertrag": "03 Vertrag",
-            "02 Information": "05 Information", 
+            "02 Information": "05 Information",
             "03 Rechnung": "04 Rechnung"
         }
 
@@ -237,48 +237,48 @@ class PDFSorter:
 
         # Save updated categories
         self._save_learned_categories()
-        
+
     def _save_learned_categories(self):
         """Save learned categories to file."""
         with open(self.knowledge_file, 'w', encoding='utf-8') as f:
             json.dump(self.learned_categories, f, ensure_ascii=False, indent=2)
-            
+
     def _extract_document_type(self, filename: str) -> str:
         """Extract the document type from filename (after date if present)."""
         # Remove file extension
         name = Path(filename).stem
-        
+
         # Split by common separators
         parts = re.split(r'[_\s-]', name)
-        
+
         # Remove date-like parts (assuming YYYYMMDD or DDMMYYYY format)
         parts = [p for p in parts if not re.match(r'^\d{8}$', p)]
-        
+
         # Join remaining parts
         return ' '.join(parts)
-            
+
     def _suggest_category(self, doc_type: str) -> str:
         """Suggest a category based on learned patterns."""
         if not self.learned_categories:
             return None
-            
+
         doc_type_lower = doc_type.lower()
 
         # Check each category's known document types
         for category, data in self.learned_categories.items():
             for known_type in data['document_types']:
                 # Check for exact match or partial match
-                if (known_type.lower() in doc_type_lower or 
+                if (known_type.lower() in doc_type_lower or
                     doc_type_lower in known_type.lower()):
                     return category
-                
+
         return None
-        
+
     def _ask_for_category(self, filename: str, doc_type: str) -> str:
         """Ask user for the correct category and learn from it."""
         print(f"\nNeed help categorizing: {filename}")
         print(f"Document type appears to be: {doc_type}")
-        
+
         # Check if there might be a personal name
         words = doc_type.split()
         if len(words) > 1:
@@ -296,7 +296,7 @@ class PDFSorter:
                     except ValueError:
                         pass
                     print("Please enter a valid number.")
-        
+
         # Show predefined categories only
         print("\nAvailable categories:")
         categories = ["01 Antrag", "02 Bescheid", "03 Vertrag", "04 Rechnung", "05 Information"]
@@ -319,8 +319,8 @@ class PDFSorter:
                     print("Please enter a number between 1 and 5.")
             except ValueError:
                 print("Please enter a valid number.")
-            
-        
+
+
     def _update_category_knowledge(self, category: str, doc_type: str):
         """Update category knowledge with new document type."""
         if category not in self.learned_categories:
@@ -328,12 +328,12 @@ class PDFSorter:
                 'document_types': [],
                 'created_at': datetime.now().isoformat()
             }
-            
+
         # Add new document type if not already known
         if doc_type.lower() not in [t.lower() for t in self.learned_categories[category]['document_types']]:
             self.learned_categories[category]['document_types'].append(doc_type)
             self._save_learned_categories()
-        
+
     def _wait_for_file_sync(self, file_path: Path, timeout: int = 30) -> bool:
         """
         Wait for a file to be fully synced (no size changes for a period).
@@ -342,7 +342,7 @@ class PDFSorter:
         start_time = time.time()
         last_size = -1
         stable_count = 0
-        
+
         while time.time() - start_time < timeout:
             try:
                 current_size = file_path.stat().st_size
@@ -357,33 +357,33 @@ class PDFSorter:
             except FileNotFoundError:
                 time.sleep(1)
                 continue
-            
+
         return False
 
     def _is_cloud_file_ready(self, file_path: Path) -> bool:
         """Check if a cloud-stored file is ready for processing."""
         if not self.is_cloud_path:
             return True
-            
+
         try:
             # Check if file exists and is readable
             if not file_path.exists():
                 print(f"\nWaiting for cloud to sync {file_path.name}...")
                 return False
-                
+
             # Check if file is fully downloaded (not just a placeholder)
             if file_path.stat().st_size == 0:
                 print(f"\nWaiting for {file_path.name} to download...")
                 return False
-                
+
             # Wait for file to stabilize (finish syncing)
             if not self._wait_for_file_sync(file_path):
                 print(f"\nWarning: {file_path.name} may not be fully synced")
                 confirm = input("Process anyway? (y/n): ").lower()
                 return confirm == 'y'
-                
+
             return True
-            
+
         except (PermissionError, FileNotFoundError) as e:
             print(f"\nError accessing {file_path.name}: {str(e)}")
             return False
@@ -457,7 +457,7 @@ class PDFSorter:
     def sort_pdfs(self) -> Dict[str, List[str]]:
         """Sort files into appropriate categories and year subfolders."""
         results = defaultdict(lambda: defaultdict(list))
-        
+
         # Get list of files
         try:
             files = []
@@ -474,36 +474,36 @@ class PDFSorter:
             print(f"\nError: Cannot access {self.source_dir}")
             print("Please check if you have permission to access this cloud folder")
             return dict(results)
-            
+
         total_files = len(files)
-        
+
         if not total_files:
             print("No files found in the directory.")
             return dict(results)
-            
+
         if self.is_cloud_path:
             print(f"\nWorking with {self.cloud_type.title()} folder. Files may take longer to process.")
-            
+
         # Process each file
         for i, file in enumerate(files, 1):
             print(f"\rProcessing file {i}/{total_files}: {file.name}", end="")
-            
+
             # For cloud files, ensure file is ready
             if not self._is_cloud_file_ready(file):
                 print(f"\nSkipping {file.name} - not ready for processing")
                 continue
-                
+
             # Extract document type from filename
             doc_type = self._extract_document_type(file.name)
-            
+
             # Try to determine category
             category = self._suggest_category(doc_type)
-            
+
             # If unsure, ask user
             if category is None:
                 print()  # New line for user interaction
                 category = self._ask_for_category(file.name, doc_type)
-                
+
             # Create category folder if needed
             category_dir = self.source_dir / category
             try:
@@ -602,9 +602,9 @@ class PDFSorter:
                     print("  This might be due to cloud sync issues. Please try again in a few moments.")
                 else:
                     print("  Please check file permissions and ensure the target directory is writable.")
-                
+
         print()  # New line after progress indicator
-        
+
         # Format results for printing
         formatted_results = {}
         for category, year_files in results.items():
@@ -614,72 +614,81 @@ class PDFSorter:
                     formatted_results[category].extend(files)
                 else:
                     formatted_results[category].extend([f"{year}/{file}" for file in files])
-        
+
         return formatted_results
 
 
     def _sync_folder_structure(self):
-        """Synchronize folder structure with the knowledge file."""
+        """Synchronize folder structure with the knowledge file and migrate all old variants to the new structure."""
         if not self.learned_categories:
             return
 
         try:
-            # Get existing folders
-            existing_folders = [f.name for f in self.source_dir.iterdir() if f.is_dir()]
-
-            # Migration mapping for folder renaming
-            folder_migration_map = {
-                "01 Vertrag": "03 Vertrag",
-                "02 Information": "05 Information",
-                "03 Rechnung": "04 Rechnung"
+            # Zielstruktur: Mapping von Kategorie-Basisnamen auf Zielordnernamen
+            canonical_folders = {
+                "antrag": "01 Antrag",
+                "bescheid": "02 Bescheid",
+                "vertrag": "03 Vertrag",
+                "rechnung": "04 Rechnung",
+                "information": "05 Information"
             }
 
-            # Handle folder migrations first
-            for old_folder, new_folder in folder_migration_map.items():
-                old_path = self.source_dir / old_folder
-                new_path = self.source_dir / new_folder
+            # Alle existierenden Ordner im Quellverzeichnis erfassen
+            existing_folders = [f for f in self.source_dir.iterdir() if f.is_dir()]
 
-                if old_path.exists() and not new_path.exists():
-                    try:
-                        old_path.rename(new_path)
-                        print(f"Migrated folder: {old_folder} → {new_folder}")
-                        # Update existing_folders list
-                        if old_folder in existing_folders:
-                            existing_folders.remove(old_folder)
-                            existing_folders.append(new_folder)
-                    except Exception as e:
-                        print(f"Error migrating folder {old_folder}: {str(e)}")
-
-            # Create mapping of folder base names to full names
-            existing_folder_map = {}
+            # Mapping: Basisname (ohne Nummer, Unterstrich, etc.) → Liste[Ordner]
+            folder_variants = {}
             for folder in existing_folders:
-                # Handle both underscore and space formats
-                base_name = re.sub(r'^\d+[\s_]', '', folder.lower())
-                existing_folder_map[base_name] = folder
+                # Basisname extrahieren (z.B. "01_Vertrag" → "vertrag", "Vertrag" → "vertrag")
+                name = folder.name.lower().replace('_', ' ').strip()
+                # Entferne führende Nummern und Leerzeichen
+                name = re.sub(r'^[0-9]+[\s_]*', '', name)
+                # Nur den ersten Begriff nehmen (z.B. "vertrag" aus "vertrag alt")
+                base = name.split()[0] if name.split() else name
+                if base in canonical_folders:
+                    folder_variants.setdefault(base, []).append(folder)
 
-            # Process each category from knowledge file
-            for category in self.learned_categories.keys():
-                category_path = self.source_dir / category
-                base_name = re.sub(r'^\d+[\s_]', '', category.lower())
-
-                # Check if a similar folder exists (ignoring number prefix and separator)
-                if base_name in existing_folder_map:
-                    existing_folder = existing_folder_map[base_name]
-                    if existing_folder != category:
-                        # Rename folder if it doesn't match the exact name
-                        old_path = self.source_dir / existing_folder
-                        try:
-                            old_path.rename(category_path)
-                            print(f"Renamed folder: {existing_folder} → {category}")
-                        except Exception as e:
-                            print(f"Error renaming folder {existing_folder}: {str(e)}")
-                else:
-                    # Create new folder if it doesn't exist
+            # Für jede Kategorie: alle Varianten in Zielordner zusammenführen
+            for base, target_name in canonical_folders.items():
+                target_path = self.source_dir / target_name
+                # Zielordner ggf. anlegen
+                if not target_path.exists():
                     try:
-                        category_path.mkdir(exist_ok=True)
-                        print(f"Created folder: {category}")
+                        target_path.mkdir(exist_ok=True)
+                        print(f"Created folder: {target_name}")
                     except Exception as e:
-                        print(f"Error creating folder {category}: {str(e)}")
+                        print(f"Error creating folder {target_name}: {str(e)}")
+                        continue
+                # Alle Varianten (außer Zielordner selbst) migrieren
+                for folder in folder_variants.get(base, []):
+                    if folder == target_path:
+                        continue
+                    # Dateien/Unterordner verschieben
+                    for item in folder.iterdir():
+                        dest = target_path / item.name
+                        # Falls Datei schon existiert, umbenennen
+                        if dest.exists():
+                            # Füge Suffix hinzu, um Kollision zu vermeiden
+                            stem, ext = os.path.splitext(item.name)
+                            for i in range(1, 100):
+                                new_name = f"{stem}_alt{i}{ext}"
+                                new_dest = target_path / new_name
+                                if not new_dest.exists():
+                                    dest = new_dest
+                                    break
+                        try:
+                            if item.is_dir():
+                                shutil.move(str(item), str(dest))
+                            else:
+                                shutil.move(str(item), str(dest))
+                        except Exception as e:
+                            print(f"Error moving {item} to {dest}: {str(e)}")
+                    # Alten Ordner löschen
+                    try:
+                        folder.rmdir()
+                        print(f"Removed old folder: {folder.name}")
+                    except Exception as e:
+                        print(f"Error removing old folder {folder.name}: {str(e)}")
 
         except Exception as e:
             print(f"Error synchronizing folder structure: {str(e)}")
@@ -689,44 +698,44 @@ def get_valid_directory() -> str:
     """Ask user for a directory path and validate it."""
     while True:
         path = input("\nEnter the path to your documents folder: ").strip()
-        
+
         # Handle paths with quotes
         path = path.strip('"\'')
-        
+
         # Convert ~ to full home directory path if present
         if path.startswith("~"):
             path = os.path.expanduser(path)
-            
+
         # Convert relative path to absolute path
         path = os.path.abspath(path)
-        
+
         # Special handling for iCloud paths
         if "Mobile Documents/com~apple~CloudDocs" in path:
             # Ensure the path is properly formatted for iCloud
             icloud_base = os.path.expanduser("~/Library/Mobile Documents/com~apple~CloudDocs")
             if not path.startswith(icloud_base):
                 # Try to fix the path by replacing the iCloud portion
-                path = path.replace("Library/Mobile Documents/com~apple~CloudDocs", 
+                path = path.replace("Library/Mobile Documents/com~apple~CloudDocs",
                                   icloud_base.replace(os.path.expanduser("~"), ""))
                 path = os.path.expanduser(path)
-        
+
         try:
             # Try to resolve any symlinks and normalize the path
             path = str(Path(path).resolve())
-            
+
             if not os.path.exists(path):
                 print(f"Error: The path '{path}' does not exist.")
                 print("If this is an iCloud folder, make sure it's synced locally.")
                 print("Try copying the path directly from Finder (right-click folder → Option key → Copy as Pathname)")
                 continue
-                
+
             if not os.path.isdir(path):
                 print(f"Error: '{path}' is not a directory.")
                 continue
-                
+
             # Try to list directory contents to verify permissions
             try:
-                files = [f for f in os.listdir(path) 
+                files = [f for f in os.listdir(path)
                         if f.lower().endswith(('.pdf', '.jpg', '.png', '.jpeg'))]
                 if not files:
                     print(f"Warning: No supported files found in '{path}'")
@@ -737,9 +746,9 @@ def get_valid_directory() -> str:
                 print(f"Error: Cannot access '{path}'")
                 print("Please check your permissions for this folder")
                 continue
-                
+
             return path
-            
+
         except Exception as e:
             print(f"Error with path '{path}': {str(e)}")
             print("Please make sure the path is correct and accessible")
@@ -748,15 +757,15 @@ def get_valid_directory() -> str:
 def main():
     print("Document Sorter")
     print("==============")
-    
+
     while True:
         # Get and validate the source directory from user input
         source_dir = get_valid_directory()
-        
+
         # Create and run the sorter
         sorter = PDFSorter(source_dir)
         results = sorter.sort_pdfs()
-        
+
         # Print results
         print("\nSorting Results:")
         print("--------------")
@@ -774,7 +783,7 @@ def main():
                 print(f"\n📝 Note: If you're using iCloud, please verify that files have been moved.")
                 print(f"   iCloud sync can sometimes delay file system operations.")
                 print(f"   You can check the folders manually to confirm the moves completed.")
-        
+
         # Ask if user wants to process another folder
         print("\nWould you like to sort another folder?")
         choice = input("Enter 'y' for yes, any other key to exit: ").lower().strip()
@@ -783,4 +792,4 @@ def main():
             break
 
 if __name__ == "__main__":
-    main() 
+    main()
